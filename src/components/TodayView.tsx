@@ -97,37 +97,18 @@ export default function TodayView({
     return map
   }, [logs, selectedDate, idRedirectMap])
 
-  // Preserves habits on past locked days:
-  // - Open current / future dates: show canonical active habits (never duplicate)
-  // - Past / locked dates: show ONLY habits that were logged on that day!
-  //   Newly created habits (added today or in future) must NEVER appear on past locked days.
+  // The active challenge habits: Day 1 through Day 90 always show the user's active challenge habits.
+  // Archived preset habits are strictly excluded everywhere so Day 1 and Day 5 have the exact same habits!
   const activeHabits = useMemo(() => {
-    if (selectedDate >= todayStr && !isLocked) {
-      return canonicalHabits.filter(h => !h.archived)
-    }
-
-    // For past days or locked days:
-    // 1. Strictly show ONLY the habits that have logs on this date
-    const loggedHabits = canonicalHabits.filter(h => logMap.has(h.id))
-    if (loggedHabits.length > 0) {
-      return loggedHabits
-    }
-
-    // 2. Fallback for past days without logs:
-    // Show only active habits that were created on or before this date
-    return canonicalHabits.filter(h => {
-      if (h.archived) return false
-      if (h.created_at && h.created_at.slice(0, 10) > selectedDate) return false
-      return true
-    })
-  }, [canonicalHabits, logMap, selectedDate, todayStr, isLocked])
+    return canonicalHabits.filter(h => !h.archived)
+  }, [canonicalHabits])
 
   const doneCount = useMemo(() => {
     return activeHabits.filter(h => isHabitDone(h, logMap.get(h.id))).length
   }, [activeHabits, logMap])
 
   // Persist snapshot of locked days to ensure immutable day preservation,
-  // and heal any old corrupted snapshot where total was inflated
+  // and heal any old corrupted snapshot where total doesn't match activeHabits
   useEffect(() => {
     if (!isLocked || activeHabits.length === 0) return
     const key = `wa_locked_snapshots_${userId}`
@@ -135,7 +116,7 @@ export default function TodayView({
       const saved = localStorage.getItem(key)
       const snapshots = saved ? JSON.parse(saved) : {}
       const existing = snapshots[selectedDate]
-      const needsHealing = existing && (existing.total > activeHabits.length || existing.total > 20)
+      const needsHealing = existing && (existing.total !== activeHabits.length || existing.total > 15)
 
       if (!existing || needsHealing) {
         const pct = Math.round((doneCount / activeHabits.length) * 100)

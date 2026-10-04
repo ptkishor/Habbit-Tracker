@@ -143,15 +143,17 @@ export function computeDayStats(
     }
   }
 
+  const activeCanonical = canonicalHabits.filter(h => !h.archived)
+
   return dates
     .filter(d => d <= todayStr)
     .map(date => {
-      // 1. If date has an immutable saved locked snapshot, check if it needs healing
+      // 1. If date has an immutable saved locked snapshot, verify it matches active habits count
       if (
         lockedSnapshots &&
         lockedSnapshots[date] &&
         lockedSnapshots[date].total > 0 &&
-        lockedSnapshots[date].total <= canonicalHabits.length
+        lockedSnapshots[date].total === activeCanonical.length
       ) {
         return {
           date,
@@ -163,22 +165,7 @@ export function computeDayStats(
       }
 
       const dayLogs = logMap.get(date) ?? new Map<string, Log>()
-
-      // 2. Determine applicable habits for this specific date:
-      // - For past days with logs: strictly only the habits that were logged on that day!
-      //   New habits added afterwards must NEVER be added to past locked days.
-      const isPast = date < todayStr
-      let applicableHabits: Habit[]
-
-      if (isPast && dayLogs.size > 0) {
-        applicableHabits = canonicalHabits.filter(h => dayLogs.has(h.id))
-      } else {
-        applicableHabits = canonicalHabits.filter(h => {
-          if (h.archived) return false
-          if (isPast && h.created_at && h.created_at.slice(0, 10) > date) return false
-          return true
-        })
-      }
+      const applicableHabits = activeCanonical
 
       let completed = 0
       for (const habit of applicableHabits) {

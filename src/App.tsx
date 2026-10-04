@@ -126,10 +126,10 @@ function MainApp() {
       const saved = localStorage.getItem(`wa_locked_snapshots_${effectiveUserId}`)
       if (!saved) return {}
       const parsed = JSON.parse(saved)
-      // Heal any corrupted snapshot where total was inflated due to un-deduplicated habits
+      // Heal any corrupted snapshot where total was inflated due to un-deduplicated or archived habits
       let healed = false
       for (const k of Object.keys(parsed)) {
-        if (parsed[k]?.total > 20) {
+        if (parsed[k]?.total !== 11) {
           delete parsed[k]
           healed = true
         }

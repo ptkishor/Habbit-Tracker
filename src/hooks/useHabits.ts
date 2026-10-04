@@ -11,7 +11,8 @@ function getInitialRealHabits(): Habit[] {
     try {
       const parsed = JSON.parse(saved)
       if (Array.isArray(parsed)) {
-        return deduplicateHabits(parsed).canonicalHabits
+        const activeOnly = parsed.filter(h => !h.archived)
+        return deduplicateHabits(activeOnly).canonicalHabits
       }
     } catch {}
   }
@@ -61,6 +62,7 @@ export function useHabits() {
             .from('habits')
             .select('*')
             .eq('user_id', user.id)
+            .eq('archived', false)
             .order('position', { ascending: true }),
           supabase
             .from('logs')
