@@ -5,7 +5,7 @@ import Modal from './Modal'
 import { AppIcon } from './Icons'
 import { celebrate, showToast, burst } from '../lib/effects'
 import { playCelebrationSound } from '../lib/soundEffects'
-import { isHabitDone, today, getDayNumber } from '../lib/dateUtils'
+import { isHabitDone, today, getDayNumber, isDatePastAutoLockCutoff, getAutoLockRemainingText } from '../lib/dateUtils'
 
 interface TodayViewProps {
   userId: string
@@ -45,9 +45,14 @@ export default function TodayView({
     return logs.some(l => l.date === selectedDate && l.notes?.includes('final_submitted'))
   }, [logs, selectedDate])
 
+  // 12-hour auto-lock cutoff: past days auto-lock 12 hours after day ends (next day 12:00 PM noon)
+  const isAutoLocked = useMemo(() => {
+    return isDatePastAutoLockCutoff(selectedDate)
+  }, [selectedDate])
+
   const isDaySubmitted = submittedDates.includes(selectedDate) || isSubmittedFromLogs
   const isFuture = selectedDate > todayStr
-  const isLocked = isFuture || isDaySubmitted
+  const isLocked = isFuture || isDaySubmitted || isAutoLocked
 
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -83,7 +88,16 @@ export default function TodayView({
       btnEl: HTMLElement | null,
       tileEl: HTMLElement | null
     ) => {
-      if (isLocked) return
+      if (isLocked) {
+        showToast(
+          isDaySubmitted
+            ? 'Day is finalized and locked.'
+            : isAutoLocked
+            ? 'Day is auto-locked (12h window ended). Past habits cannot be changed.'
+            : 'Future day is locked until that date.'
+        )
+        return
+      }
 
       const curLog = logMap.get(habit.id) || {
         id: '',
@@ -256,8 +270,16 @@ export default function TodayView({
           flexWrap: 'wrap',
           gap: '10px',
           padding: '12px 18px',
-          background: isDaySubmitted ? 'rgba(25, 199, 174, 0.08)' : 'var(--card)',
-          border: isDaySubmitted ? '1px solid rgba(25, 199, 174, 0.3)' : '1px solid var(--line)',
+          background: isDaySubmitted
+            ? 'rgba(25, 199, 174, 0.08)'
+            : isAutoLocked
+            ? 'rgba(229, 72, 77, 0.08)'
+            : 'var(--card)',
+          border: isDaySubmitted
+            ? '1px solid rgba(25, 199, 174, 0.3)'
+            : isAutoLocked
+            ? '1px solid rgba(229, 72, 77, 0.3)'
+            : '1px solid var(--line)',
           borderRadius: '16px',
         }}
       >
@@ -270,22 +292,33 @@ export default function TodayView({
               width: '32px',
               height: '32px',
               borderRadius: '10px',
-              background: isDaySubmitted ? 'rgba(25, 199, 174, 0.15)' : 'var(--card2)',
-              color: isDaySubmitted ? 'var(--done)' : 'var(--ice)',
+              background: isDaySubmitted
+                ? 'rgba(25, 199, 174, 0.15)'
+                : isAutoLocked
+                ? 'rgba(229, 72, 77, 0.15)'
+                : 'var(--card2)',
+              color: isDaySubmitted ? 'var(--done)' : isAutoLocked ? 'var(--miss)' : 'var(--ice)',
             }}
           >
-            <AppIcon name={isDaySubmitted ? 'shield' : 'today'} size={18} />
+            <AppIcon name={isDaySubmitted || isAutoLocked ? 'lock' : 'today'} size={18} />
           </span>
           <div>
             <div style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--ink)' }}>
               {isDaySubmitted
                 ? 'Day Locked & Finalized'
+                : isAutoLocked
+                ? 'Day Auto-Locked (12h Expired)'
                 : isFuture
                 ? 'Future Day (Locked)'
                 : 'Day In Progress'}
             </div>
             <div style={{ fontSize: '12.5px', color: 'var(--ink3)' }}>
               {doneCount} of {activeHabits.length} habits completed for {selectedDate}
+              {!isDaySubmitted && !isFuture && (
+                <span style={{ marginLeft: '8px', opacity: 0.85 }}>
+                  • {getAutoLockRemainingText(selectedDate)}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -308,6 +341,24 @@ export default function TodayView({
             >
               <AppIcon name="lock" size={13} />
               <span>Final Submitted (Cannot Change)</span>
+            </div>
+          ) : isAutoLocked ? (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '99px',
+                background: 'rgba(229, 72, 77, 0.15)',
+                color: 'var(--miss)',
+                fontSize: '12.5px',
+                fontWeight: 700,
+              }}
+              title="Day automatically locked 12 hours after midnight. Past edits are closed."
+            >
+              <AppIcon name="lock" size={13} />
+              <span>Auto-Locked (12h Expired)</span>
             </div>
           ) : isFuture ? (
             <div

@@ -214,6 +214,7 @@ export function useHabits() {
         date,
         status: updates.status !== undefined ? updates.status : existing?.status ?? null,
         value: updates.value !== undefined ? updates.value : existing?.value ?? 0,
+        notes: updates.notes !== undefined ? updates.notes : existing?.notes,
       }
       const idx = prev.findIndex(l => l.habit_id === habitId && l.date === date)
       if (idx >= 0) {
@@ -245,12 +246,14 @@ export function useHabits() {
         }
       }
 
+      const existingForDb = logs.find(l => (l.habit_id === habitId || l.habit_id === targetHabitId) && l.date === date)
       const logData = {
         habit_id: targetHabitId,
         user_id: user.id,
         date,
-        status: updates.status !== undefined ? updates.status : null,
-        value: updates.value !== undefined ? updates.value : 0,
+        status: updates.status !== undefined ? updates.status : (existingForDb?.status ?? null),
+        value: updates.value !== undefined ? updates.value : (existingForDb?.value ?? 0),
+        notes: updates.notes !== undefined ? updates.notes : (existingForDb?.notes ?? null),
       }
 
       try {

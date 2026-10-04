@@ -60,6 +60,7 @@ interface DialPanelProps {
   streakBest: number
   averagePct: number
   selectedDayPct: number
+  onOpenStreakDetails?: () => void
 }
 
 export default function DialPanel({
@@ -71,6 +72,7 @@ export default function DialPanel({
   streakBest,
   averagePct,
   selectedDayPct,
+  onOpenStreakDetails,
 }: DialPanelProps) {
   const totalDays = durationDays || DEFAULT_TOTAL
   const status = useMemo(
@@ -236,7 +238,17 @@ export default function DialPanel({
 
       {/* Stats row */}
       <div className="stats">
-        <div className="stat">
+        <button
+          type="button"
+          className="stat"
+          onClick={onOpenStreakDetails}
+          style={{
+            cursor: onOpenStreakDetails ? 'pointer' : 'default',
+            textAlign: 'left',
+            transition: 'all 0.2s',
+          }}
+          title="Click to view streak breakdown & rules"
+        >
           <span className="sl">Streak</span>
           <b>
             <span className="fl" role="img" aria-label="flame" style={{ display: 'inline-block', fontSize: '18px', lineHeight: 1 }}>
@@ -245,7 +257,7 @@ export default function DialPanel({
             <span id="stStreak">{animStreak}</span>
             <small>days</small>
           </b>
-        </div>
+        </button>
         <div className="stat">
           <span className="sl">Best</span>
           <b>

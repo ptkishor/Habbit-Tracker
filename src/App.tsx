@@ -97,6 +97,7 @@ function MainApp() {
   const [activeTab, setActiveTab] = useState<TabKey>('today')
   const [selectedDate, setSelectedDate] = useState<string>(currentToday)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
+  const [isStreakModalOpen, setIsStreakModalOpen] = useState(false)
 
   // Midnight watcher to auto-advance to current day
   useEffect(() => {
@@ -114,7 +115,20 @@ function MainApp() {
     }
   }, [currentToday, selectedDate])
 
-  const startDate = profile?.start_date || currentToday
+  const earliestLogDate = useMemo(() => {
+    if (!logs.length) return currentToday
+    const validDates = logs.map(l => l.date).filter(Boolean).sort()
+    return validDates[0] || currentToday
+  }, [logs, currentToday])
+
+  const effectiveStartDate = useMemo(() => {
+    if (profile?.start_date) {
+      return profile.start_date < earliestLogDate ? profile.start_date : (logs.length > 0 ? earliestLogDate : profile.start_date)
+    }
+    return logs.length > 0 ? earliestLogDate : currentToday
+  }, [profile?.start_date, earliestLogDate, logs.length, currentToday])
+
+  const startDate = effectiveStartDate
   const durationDays = profile?.duration_days ?? 90
   const threshold = profile?.threshold ?? 80
 
@@ -133,20 +147,31 @@ function MainApp() {
     return getChallengeDates(startDate, durationDays)
   }, [startDate, durationDays])
 
+  // Include both challenge dates and all logged dates so past logs are never omitted
+  const allStatsDates = useMemo(() => {
+    const datesSet = new Set<string>(challengeDates)
+    for (const l of logs) {
+      if (l.date && l.date <= currentToday) {
+        datesSet.add(l.date)
+      }
+    }
+    return Array.from(datesSet).sort()
+  }, [challengeDates, logs, currentToday])
+
   // Real Day stats computed from real habits and logs
   const dayStats = useMemo(() => {
-    return computeDayStats(challengeDates, habits, logs, threshold)
-  }, [challengeDates, habits, logs, threshold])
+    return computeDayStats(allStatsDates, habits, logs, threshold)
+  }, [allStatsDates, habits, logs, threshold])
 
   // Real Habit stats
   const habitStats = useMemo(() => {
     return computeHabitStats(habits, logs, challengeDates)
   }, [habits, logs, challengeDates])
 
-  // Real Streaks
+  // Real Streaks live computed
   const streaks = useMemo(() => {
-    return computeStreaks(dayStats)
-  }, [dayStats])
+    return computeStreaks(dayStats, currentToday)
+  }, [dayStats, currentToday])
 
   // Selected date completion %
   const selectedDayPct = useMemo(() => {
@@ -202,6 +227,7 @@ function MainApp() {
           streakBest={streaks.best}
           averagePct={averagePct}
           selectedDayPct={selectedDayPct}
+          onOpenStreakDetails={() => setIsStreakModalOpen(true)}
         />
       )}
 
@@ -244,8 +270,52 @@ function MainApp() {
             </p>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
             <TabsNav activeTab={activeTab} onSelectTab={handleSelectTab} />
+
+            {/* Live Interactive Streak Button */}
+            <button
+              type="button"
+              className="btn-pill"
+              id="streak-header-btn"
+              style={{
+                padding: '6px 13px',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                background: streaks.current > 0
+                  ? 'radial-gradient(ellipse at center, rgba(255, 107, 61, 0.22) 0%, rgba(255, 107, 61, 0.08) 100%)'
+                  : 'var(--card)',
+                borderColor: streaks.current > 0 ? 'rgba(255, 107, 61, 0.45)' : 'var(--line)',
+                color: streaks.current > 0 ? '#FFA726' : 'var(--ink2)',
+                borderRadius: '99px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                cursor: 'pointer',
+                boxShadow: streaks.current > 0 ? '0 0 14px rgba(255, 107, 61, 0.25)' : 'none',
+                transition: 'all .25s ease',
+              }}
+              onClick={() => setIsStreakModalOpen(true)}
+              title={`Current Streak: ${streaks.current} Days • Best: ${streaks.best} Days (Click for streak details)`}
+            >
+              <span
+                style={{
+                  fontSize: '15px',
+                  lineHeight: 1,
+                  filter: streaks.current > 0 ? 'drop-shadow(0 0 6px rgba(255, 107, 61, 0.8))' : 'none',
+                }}
+              >
+                🔥
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {streaks.current}d Streak
+              </span>
+              {streaks.best > streaks.current && streaks.best > 0 && (
+                <span style={{ fontSize: '11px', opacity: 0.7, fontWeight: 600 }}>
+                  (Best: {streaks.best}d)
+                </span>
+              )}
+            </button>
 
             {/* Cloud Sync Status / Refresh button */}
             {user ? (
@@ -431,6 +501,128 @@ function MainApp() {
         onClose={() => setIsAuthModalOpen(false)}
       >
         <AuthPage onEnterDemo={() => setIsAuthModalOpen(false)} />
+      </Modal>
+
+      {/* Streak Details Modal */}
+      <Modal
+        isOpen={isStreakModalOpen}
+        title="Streak Intelligence & Milestones"
+        onClose={() => setIsStreakModalOpen(false)}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          {/* Flame Banner */}
+          <div
+            style={{
+              padding: '22px 18px',
+              borderRadius: '20px',
+              background: 'radial-gradient(ellipse at center, rgba(255, 107, 61, 0.22) 0%, rgba(255, 107, 61, 0.05) 100%)',
+              border: '1px solid rgba(255, 107, 61, 0.4)',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <div style={{ fontSize: '42px', lineHeight: 1 }}>🔥</div>
+            <div
+              style={{
+                fontSize: '34px',
+                fontWeight: 800,
+                fontFamily: "'Bricolage Grotesque', sans-serif",
+                color: '#FFA726',
+                letterSpacing: '-0.03em',
+              }}
+            >
+              {streaks.current} <span style={{ fontSize: '20px', fontWeight: 600, color: 'var(--ink)' }}>Days Active Streak</span>
+            </div>
+            <div style={{ fontSize: '13px', color: 'var(--ink2)', maxWidth: '340px' }}>
+              {streaks.current > 0
+                ? 'Your daily momentum is burning strong! Keep logging every day to build a habit that cannot be broken.'
+                : `Complete >= ${threshold}% of your habits today to ignite your streak counter!`}
+            </div>
+          </div>
+
+          {/* Stats Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
+            <div
+              style={{
+                padding: '14px',
+                borderRadius: '16px',
+                background: 'var(--card2)',
+                border: '1px solid var(--line)',
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ fontSize: '11.5px', color: 'var(--ink3)', fontWeight: 600, textTransform: 'uppercase' }}>
+                Personal Best
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--ice)', marginTop: '4px' }}>
+                ⭐ {streaks.best}d
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: '14px',
+                borderRadius: '16px',
+                background: 'var(--card2)',
+                border: '1px solid var(--line)',
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ fontSize: '11.5px', color: 'var(--ink3)', fontWeight: 600, textTransform: 'uppercase' }}>
+                Daily Standard
+              </div>
+              <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--done)', marginTop: '4px' }}>
+                🎯 {threshold}%
+              </div>
+            </div>
+          </div>
+
+          {/* Rules & Protections */}
+          <div
+            style={{
+              padding: '14px 16px',
+              borderRadius: '16px',
+              background: 'var(--card2)',
+              border: '1px solid var(--line)',
+              fontSize: '13px',
+              color: 'var(--ink2)',
+              lineHeight: 1.5,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+            }}
+          >
+            <div style={{ fontWeight: 700, color: 'var(--ink)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>🛡️</span>
+              <span>Streak Rules & Auto-Lock Protection</span>
+            </div>
+            <div>
+              &bull; <b>1 Weekly Grace Day:</b> 1 missed day per calendar week is protected so your streak won't immediately reset.
+            </div>
+            <div>
+              &bull; <b>12-Hour Auto-Lock Cutoff:</b> Every day automatically locks 12 hours after midnight (12:00 PM noon next day). Past habits cannot be altered.
+            </div>
+            <div>
+              &bull; <b>Today in Progress:</b> Working through habits today maintains your previous streak safely while the day is ongoing.
+            </div>
+          </div>
+
+          {/* CTA to Insights */}
+          <button
+            type="button"
+            className="cta"
+            style={{ width: '100%', justifyContent: 'center' }}
+            onClick={() => {
+              setIsStreakModalOpen(false)
+              handleSelectTab('insights')
+            }}
+          >
+            <span>View Habit Success Circles & Insights &rarr;</span>
+          </button>
+        </div>
       </Modal>
     </div>
   )

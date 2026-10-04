@@ -154,7 +154,11 @@ export function computeHabitStats(
 export function computeStreaks(dayStats: DayStats[], todayStr = today()): StreakInfo {
   if (!dayStats || dayStats.length === 0) return { current: 0, best: 0 }
 
-  const sorted = [...dayStats].sort((a, b) => a.date.localeCompare(b.date))
+  // Filter to valid days (where habits existed or logs were recorded)
+  const valid = dayStats.filter(d => d.total > 0 || d.completed > 0)
+  if (valid.length === 0) return { current: 0, best: 0 }
+
+  const sorted = [...valid].sort((a, b) => a.date.localeCompare(b.date))
   const pastDays = sorted.filter(d => d.date < todayStr)
   const todayStat = sorted.find(d => d.date === todayStr)
 
@@ -171,7 +175,7 @@ export function computeStreaks(dayStats: DayStats[], todayStr = today()): Streak
     return toDateStr(monday)
   }
 
-  // Iterate through all past days
+  // Iterate forward through past days
   for (let i = 0; i < pastDays.length; i++) {
     const d = pastDays[i]
     const wKey = getWeekKey(d.date)
@@ -208,6 +212,49 @@ export function computeStreaks(dayStats: DayStats[], todayStr = today()): Streak
   if (current > best) best = current
 
   return { current, best }
+}
+
+/**
+ * Check if a date is past the 12-hour auto-lock cutoff window.
+ * The calendar day ends at 23:59:59.
+ * 12 hours after the day ends is 12:00:00 PM (noon) of the NEXT day.
+ * If current time is past this cutoff, the day is permanently auto-locked.
+ */
+export function isDatePastAutoLockCutoff(dateStr: string, now = new Date()): boolean {
+  try {
+    const [year, month, day] = dateStr.split('-').map(Number)
+    if (!year || !month || !day) return false
+
+    // Next day at 12:00:00 PM (noon)
+    const cutoff = new Date(year, month - 1, day + 1, 12, 0, 0, 0)
+    return now.getTime() > cutoff.getTime()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Human-readable status of the auto-lock window for a given date.
+ */
+export function getAutoLockRemainingText(dateStr: string, now = new Date()): string {
+  try {
+    const [year, month, day] = dateStr.split('-').map(Number)
+    if (!year || !month || !day) return 'Auto-Locked'
+
+    const cutoff = new Date(year, month - 1, day + 1, 12, 0, 0, 0)
+    const diffMs = cutoff.getTime() - now.getTime()
+    if (diffMs <= 0) return 'Auto-Locked (12h window expired)'
+
+    const hours = Math.floor(diffMs / (1000 * 60 * 60))
+    const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+    if (hours >= 24) {
+      const d = Math.floor(hours / 24)
+      return `Locks in ${d}d ${hours % 24}h`
+    }
+    return `Locks in ${hours}h ${mins}m (at 12:00 PM)`
+  } catch {
+    return 'Auto-Locked'
+  }
 }
 
 /** Get the day-of-week label (Mon, Tue, ...) for an ISO date string */
