@@ -106,11 +106,11 @@ export function computeDayStats(
 
 /** Determine if a habit is completed based on its log entry */
 export function isHabitDone(habit: Habit, log?: Log): boolean {
-  if (!log || log.status === null) return false
+  if (!log) return false
   if (habit.type === 'check') return log.status === 'done'
   if (habit.type === 'number') {
     if (log.status === 'done') return true
-    if (log.value !== undefined && habit.target !== undefined) {
+    if (log.status !== 'missed' && log.value !== undefined && habit.target !== undefined && habit.target > 0) {
       return log.value >= habit.target
     }
   }
@@ -146,35 +146,66 @@ export function computeHabitStats(
 
 /**
  * Compute current streak and best streak from day stats.
- * A "grace day" (one per week) does not break the streak when isDone=false.
+ * - Completed days (isDone === true) build and maintain streak.
+ * - Today in progress (isDone === false) does NOT break yesterday's streak.
+ * - When today is completed, streak increases by 1.
+ * - 1 grace day per calendar week protects the streak from resetting.
  */
-export function computeStreaks(dayStats: DayStats[]): StreakInfo {
+export function computeStreaks(dayStats: DayStats[], todayStr = today()): StreakInfo {
+  if (!dayStats || dayStats.length === 0) return { current: 0, best: 0 }
+
   const sorted = [...dayStats].sort((a, b) => a.date.localeCompare(b.date))
-  let current = 0
+  const pastDays = sorted.filter(d => d.date < todayStr)
+  const todayStat = sorted.find(d => d.date === todayStr)
+
   let best = 0
-  let streak = 0
+  let runningStreak = 0
   let graceDayUsedThisWeek = false
-  let weekDay = 0
+  let currentWeek = ''
 
-  for (let i = 0; i < sorted.length; i++) {
-    const d = sorted[i]
-    weekDay = (weekDay % 7) + 1
+  function getWeekKey(dateStr: string) {
+    const d = parseISO(dateStr)
+    const day = (d.getDay() + 6) % 7 // Monday = 0
+    const monday = new Date(d)
+    monday.setDate(d.getDate() - day)
+    return toDateStr(monday)
+  }
 
-    if (weekDay === 1) graceDayUsedThisWeek = false  // reset weekly grace
-
-    if (d.isDone) {
-      streak++
-    } else if (!graceDayUsedThisWeek) {
-      // Use the grace day — streak continues
-      graceDayUsedThisWeek = true
-      streak++
-    } else {
-      streak = 0
+  // Iterate through all past days
+  for (let i = 0; i < pastDays.length; i++) {
+    const d = pastDays[i]
+    const wKey = getWeekKey(d.date)
+    if (wKey !== currentWeek) {
+      currentWeek = wKey
+      graceDayUsedThisWeek = false
     }
 
-    if (streak > best) best = streak
-    current = streak
+    if (d.isDone) {
+      runningStreak++
+    } else {
+      if (!graceDayUsedThisWeek && runningStreak > 0) {
+        // Weekly grace day: protects streak from resetting to 0
+        graceDayUsedThisWeek = true
+      } else {
+        // Streak broken
+        runningStreak = 0
+      }
+    }
+    if (runningStreak > best) best = runningStreak
   }
+
+  // Determine current active streak
+  let current = 0
+  const isTodayDone = todayStat ? todayStat.isDone : false
+
+  if (isTodayDone) {
+    current = runningStreak + 1
+  } else {
+    // Today is in progress — maintain previous streak
+    current = runningStreak
+  }
+
+  if (current > best) best = current
 
   return { current, best }
 }
