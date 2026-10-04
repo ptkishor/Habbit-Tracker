@@ -15,7 +15,6 @@ import { SkeletonDialPanel, SkeletonTile } from './components/Skeleton'
 import { useHabits } from './hooks/useHabits'
 import {
   today,
-  isHabitDone,
   computeDayStats,
   computeHabitStats,
   computeStreaks,
@@ -115,6 +114,48 @@ function MainApp() {
     }
   }, [currentToday, selectedDate])
 
+  const effectiveUserId = user?.id ?? 'real-user'
+  const effectiveEmail = user?.email
+
+  // Load immutable locked snapshots to ensure added/removed habits never alter locked days
+  const [lockedSnapshots, setLockedSnapshots] = useState<
+    Record<string, { total: number; completed: number; pct: number; isDone: boolean }>
+  >(() => {
+    if (typeof window === 'undefined') return {}
+    try {
+      const saved = localStorage.getItem(`wa_locked_snapshots_${effectiveUserId}`)
+      if (!saved) return {}
+      const parsed = JSON.parse(saved)
+      // Heal any corrupted snapshot where total was inflated due to un-deduplicated habits
+      let healed = false
+      for (const k of Object.keys(parsed)) {
+        if (parsed[k]?.total > 20) {
+          delete parsed[k]
+          healed = true
+        }
+      }
+      if (healed) {
+        localStorage.setItem(`wa_locked_snapshots_${effectiveUserId}`, JSON.stringify(parsed))
+      }
+      return parsed
+    } catch {
+      return {}
+    }
+  })
+
+  // Watch for snapshot updates across views
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === `wa_locked_snapshots_${effectiveUserId}` && e.newValue) {
+        try {
+          setLockedSnapshots(JSON.parse(e.newValue))
+        } catch {}
+      }
+    }
+    window.addEventListener('storage', handleStorage)
+    return () => window.removeEventListener('storage', handleStorage)
+  }, [effectiveUserId])
+
   const earliestLogDate = useMemo(() => {
     if (!logs.length) return currentToday
     const validDates = logs.map(l => l.date).filter(Boolean).sort()
@@ -158,10 +199,10 @@ function MainApp() {
     return Array.from(datesSet).sort()
   }, [challengeDates, logs, currentToday])
 
-  // Real Day stats computed from real habits and logs
+  // Real Day stats computed from real habits and logs (preserving locked day snapshots)
   const dayStats = useMemo(() => {
-    return computeDayStats(allStatsDates, habits, logs, threshold)
-  }, [allStatsDates, habits, logs, threshold])
+    return computeDayStats(allStatsDates, habits, logs, threshold, lockedSnapshots)
+  }, [allStatsDates, habits, logs, threshold, lockedSnapshots])
 
   // Real Habit stats
   const habitStats = useMemo(() => {
@@ -175,16 +216,12 @@ function MainApp() {
 
   // Selected date completion %
   const selectedDayPct = useMemo(() => {
-    const active = habits.filter(h => !h.archived)
-    if (!active.length) return 0
-    const dayLogs = logs.filter(l => l.date === selectedDate)
-    const logMap = new Map(dayLogs.map(l => [l.habit_id, l]))
-    let done = 0
-    for (const h of active) {
-      if (isHabitDone(h, logMap.get(h.id))) done++
+    const stat = dayStats.find(d => d.date === selectedDate)
+    if (stat && stat.total > 0) {
+      return stat.completed / stat.total
     }
-    return done / active.length
-  }, [habits, logs, selectedDate])
+    return 0
+  }, [dayStats, selectedDate])
 
   // Historical Average completion %
   const averagePct = useMemo(() => {
@@ -208,9 +245,6 @@ function MainApp() {
       window.scrollTo({ top: 0, behavior: 'smooth' })
     }
   }, [])
-
-  const effectiveUserId = user?.id ?? 'real-user'
-  const effectiveEmail = user?.email
 
   return (
     <div className="app">
@@ -279,24 +313,44 @@ function MainApp() {
               className="btn-pill"
               id="streak-header-btn"
               style={{
-                padding: '6px 13px',
+                padding: '6px 14px',
                 fontSize: '12.5px',
                 fontWeight: 700,
                 background: streaks.current > 0
                   ? 'radial-gradient(ellipse at center, rgba(255, 107, 61, 0.22) 0%, rgba(255, 107, 61, 0.08) 100%)'
+                  : streaks.best > 0
+                  ? 'radial-gradient(ellipse at center, rgba(56, 189, 248, 0.16) 0%, rgba(56, 189, 248, 0.06) 100%)'
                   : 'var(--card)',
-                borderColor: streaks.current > 0 ? 'rgba(255, 107, 61, 0.45)' : 'var(--line)',
-                color: streaks.current > 0 ? '#FFA726' : 'var(--ink2)',
+                borderColor: streaks.current > 0
+                  ? 'rgba(255, 107, 61, 0.45)'
+                  : streaks.best > 0
+                  ? 'rgba(56, 189, 248, 0.4)'
+                  : 'var(--line)',
+                color: streaks.current > 0
+                  ? '#FFA726'
+                  : streaks.best > 0
+                  ? 'var(--ice)'
+                  : 'var(--ink2)',
                 borderRadius: '99px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
                 cursor: 'pointer',
-                boxShadow: streaks.current > 0 ? '0 0 14px rgba(255, 107, 61, 0.25)' : 'none',
+                boxShadow: streaks.current > 0
+                  ? '0 0 14px rgba(255, 107, 61, 0.25)'
+                  : streaks.best > 0
+                  ? '0 0 12px rgba(56, 189, 248, 0.2)'
+                  : 'none',
                 transition: 'all .25s ease',
               }}
               onClick={() => setIsStreakModalOpen(true)}
-              title={`Current Streak: ${streaks.current} Days • Best: ${streaks.best} Days (Click for streak details)`}
+              title={
+                streaks.current > 0
+                  ? `Active Streak: ${streaks.current} Days • Highest: ${streaks.best} Days`
+                  : streaks.best > 0
+                  ? `Streak broken (0d). All-time Highest: ${streaks.best} Days! Click for details.`
+                  : 'Streak: 0d. Start completing daily habits!'
+              }
             >
               <span
                 style={{
@@ -305,14 +359,18 @@ function MainApp() {
                   filter: streaks.current > 0 ? 'drop-shadow(0 0 6px rgba(255, 107, 61, 0.8))' : 'none',
                 }}
               >
-                🔥
+                {streaks.current > 0 ? '🔥' : streaks.best > 0 ? '🏆' : '🔥'}
               </span>
               <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {streaks.current}d Streak
+                {streaks.current > 0
+                  ? `${streaks.current}d Streak`
+                  : streaks.best > 0
+                  ? `0d • Highest: ${streaks.best}d`
+                  : '0d Streak'}
               </span>
-              {streaks.best > streaks.current && streaks.best > 0 && (
-                <span style={{ fontSize: '11px', opacity: 0.7, fontWeight: 600 }}>
-                  (Best: {streaks.best}d)
+              {streaks.current > 0 && streaks.best > streaks.current && (
+                <span style={{ fontSize: '11px', opacity: 0.75, fontWeight: 600 }}>
+                  (Highest: {streaks.best}d)
                 </span>
               )}
             </button>
@@ -453,6 +511,7 @@ function MainApp() {
               logs={logs}
               selectedDate={selectedDate}
               startDate={startDate}
+              streaks={streaks}
               onUpdateLog={upsertLog}
               onGoToSettings={() => handleSelectTab('settings')}
             />
@@ -478,7 +537,7 @@ function MainApp() {
             <SettingsView
               userEmail={effectiveEmail}
               profile={profile!}
-              habits={habits}
+              habits={habits.filter(h => !h.archived)}
               logs={logs}
               onRefreshProfile={refreshProfile}
               onUpdateProfile={updateProfile}
@@ -510,38 +569,113 @@ function MainApp() {
         onClose={() => setIsStreakModalOpen(false)}
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-          {/* Flame Banner */}
-          <div
-            style={{
-              padding: '22px 18px',
-              borderRadius: '20px',
-              background: 'radial-gradient(ellipse at center, rgba(255, 107, 61, 0.22) 0%, rgba(255, 107, 61, 0.05) 100%)',
-              border: '1px solid rgba(255, 107, 61, 0.4)',
-              textAlign: 'center',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <div style={{ fontSize: '42px', lineHeight: 1 }}>🔥</div>
+          {/* Flame or Highest Streak Banner */}
+          {streaks.current > 0 ? (
             <div
               style={{
-                fontSize: '34px',
-                fontWeight: 800,
-                fontFamily: "'Bricolage Grotesque', sans-serif",
-                color: '#FFA726',
-                letterSpacing: '-0.03em',
+                padding: '22px 18px',
+                borderRadius: '20px',
+                background: 'radial-gradient(ellipse at center, rgba(255, 107, 61, 0.22) 0%, rgba(255, 107, 61, 0.05) 100%)',
+                border: '1px solid rgba(255, 107, 61, 0.4)',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '8px',
               }}
             >
-              {streaks.current} <span style={{ fontSize: '20px', fontWeight: 600, color: 'var(--ink)' }}>Days Active Streak</span>
+              <div style={{ fontSize: '42px', lineHeight: 1 }}>🔥</div>
+              <div
+                style={{
+                  fontSize: '34px',
+                  fontWeight: 800,
+                  fontFamily: "'Bricolage Grotesque', sans-serif",
+                  color: '#FFA726',
+                  letterSpacing: '-0.03em',
+                }}
+              >
+                {streaks.current} <span style={{ fontSize: '20px', fontWeight: 600, color: 'var(--ink)' }}>Days Active Streak</span>
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--ink2)', maxWidth: '340px' }}>
+                Your daily momentum is burning strong! Keep logging every day to build a habit that cannot be broken.
+              </div>
             </div>
-            <div style={{ fontSize: '13px', color: 'var(--ink2)', maxWidth: '340px' }}>
-              {streaks.current > 0
-                ? 'Your daily momentum is burning strong! Keep logging every day to build a habit that cannot be broken.'
-                : `Complete >= ${threshold}% of your habits today to ignite your streak counter!`}
+          ) : streaks.best > 0 ? (
+            <div
+              style={{
+                padding: '22px 18px',
+                borderRadius: '20px',
+                background: 'radial-gradient(ellipse at center, rgba(56, 189, 248, 0.18) 0%, rgba(56, 189, 248, 0.05) 100%)',
+                border: '1px solid rgba(56, 189, 248, 0.4)',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <div style={{ fontSize: '42px', lineHeight: 1 }}>🏆</div>
+              <div
+                style={{
+                  fontSize: '32px',
+                  fontWeight: 800,
+                  fontFamily: "'Bricolage Grotesque', sans-serif",
+                  color: 'var(--ice)',
+                  letterSpacing: '-0.03em',
+                }}
+              >
+                Highest Streak: {streaks.best} Days
+              </div>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '3px 12px',
+                  borderRadius: '99px',
+                  background: 'rgba(229, 72, 77, 0.15)',
+                  color: 'var(--miss)',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                }}
+              >
+                <span>Current Streak: 0 Days (Streak Broken)</span>
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--ink2)', maxWidth: '360px' }}>
+                Your streak was interrupted, but your personal record of <b>{streaks.best} days</b> remains locked in your history! Complete &gt;= {threshold}% of your habits today to ignite your next streak!
+              </div>
             </div>
-          </div>
+          ) : (
+            <div
+              style={{
+                padding: '22px 18px',
+                borderRadius: '20px',
+                background: 'radial-gradient(ellipse at center, rgba(94, 208, 255, 0.15) 0%, rgba(94, 208, 255, 0.04) 100%)',
+                border: '1px solid rgba(94, 208, 255, 0.3)',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <div style={{ fontSize: '42px', lineHeight: 1 }}>⚡</div>
+              <div
+                style={{
+                  fontSize: '32px',
+                  fontWeight: 800,
+                  fontFamily: "'Bricolage Grotesque', sans-serif",
+                  color: 'var(--ice)',
+                  letterSpacing: '-0.03em',
+                }}
+              >
+                0 Days Active Streak
+              </div>
+              <div style={{ fontSize: '13px', color: 'var(--ink2)', maxWidth: '340px' }}>
+                Complete &gt;= {threshold}% of your daily habits today to ignite your streak counter!
+              </div>
+            </div>
+          )}
 
           {/* Stats Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>

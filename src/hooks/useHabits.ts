@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import type { Habit, Log } from '../types'
+import { deduplicateHabits } from '../lib/dateUtils'
 
 function getInitialRealHabits(): Habit[] {
   if (typeof window === 'undefined') return []
@@ -9,7 +10,9 @@ function getInitialRealHabits(): Habit[] {
   if (saved) {
     try {
       const parsed = JSON.parse(saved)
-      if (Array.isArray(parsed)) return parsed
+      if (Array.isArray(parsed)) {
+        return deduplicateHabits(parsed).canonicalHabits
+      }
     } catch {}
   }
   return []
@@ -58,7 +61,6 @@ export function useHabits() {
             .from('habits')
             .select('*')
             .eq('user_id', user.id)
-            .eq('archived', false)
             .order('position', { ascending: true }),
           supabase
             .from('logs')
@@ -76,12 +78,32 @@ export function useHabits() {
       }
 
       if (habitsData) {
-        // Strictly keep whatever is in the database
-        setHabits(habitsData as Habit[])
-        localStorage.setItem('wa_real_habits', JSON.stringify(habitsData))
-      }
+        const { canonicalHabits, idRedirectMap } = deduplicateHabits(habitsData as Habit[])
+        setHabits(canonicalHabits)
+        localStorage.setItem('wa_real_habits', JSON.stringify(canonicalHabits))
 
-      if (logsData) {
+        if (logsData) {
+          const redirectedLogs: Log[] = []
+          const seen = new Set<string>()
+          for (const l of logsData as Log[]) {
+            const canonicalId = idRedirectMap.get(l.habit_id) || l.habit_id
+            const key = `${l.date}-${canonicalId}`
+            if (!seen.has(key)) {
+              seen.add(key)
+              redirectedLogs.push({ ...l, habit_id: canonicalId })
+            } else {
+              const exIdx = redirectedLogs.findIndex(
+                r => r.date === l.date && r.habit_id === canonicalId
+              )
+              if (exIdx >= 0 && l.status === 'done') {
+                redirectedLogs[exIdx] = { ...l, habit_id: canonicalId }
+              }
+            }
+          }
+          setLogs(redirectedLogs)
+          localStorage.setItem('wa_real_logs', JSON.stringify(redirectedLogs))
+        }
+      } else if (logsData) {
         setLogs(logsData as Log[])
         localStorage.setItem('wa_real_logs', JSON.stringify(logsData))
       }
@@ -288,23 +310,37 @@ export function useHabits() {
   async function addHabit(habit: Omit<Habit, 'id' | 'user_id' | 'created_at'>) {
     const userId = user?.id || 'real-user'
     const tempId = `custom-${Date.now()}`
-    const newHabit: Habit = {
-      ...habit,
-      id: tempId,
-      user_id: userId,
-      position: habits.length + 1,
-      archived: false,
-    }
+    const normName = habit.name.trim().toLowerCase()
 
     setHabits(prev => {
-      const next = [...prev, newHabit].sort((a, b) => a.position - b.position)
+      const existingIdx = prev.findIndex(h => h.name.trim().toLowerCase() === normName)
+      let next: Habit[]
+      if (existingIdx >= 0) {
+        next = [...prev]
+        next[existingIdx] = {
+          ...prev[existingIdx],
+          ...habit,
+          archived: false,
+        }
+      } else {
+        const newHabit: Habit = {
+          ...habit,
+          id: tempId,
+          user_id: userId,
+          position: habits.length + 1,
+          archived: false,
+          created_at: new Date().toISOString(),
+        }
+        next = [...prev, newHabit]
+      }
+      next.sort((a, b) => a.position - b.position)
       localStorage.setItem('wa_real_habits', JSON.stringify(next))
       return next
     })
 
     if (user) {
       const payload: Record<string, unknown> = {
-        name: habit.name,
+        name: habit.name.trim(),
         type: habit.type,
         target: habit.target ?? null,
         unit: habit.unit ?? null,
@@ -312,6 +348,32 @@ export function useHabits() {
         position: habits.length + 1,
         archived: false,
         user_id: user.id,
+      }
+
+      // Check if habit with same name already exists in Supabase to prevent duplicate rows
+      const { data: existingRows } = await supabase
+        .from('habits')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('name', habit.name.trim())
+
+      if (existingRows && existingRows.length > 0) {
+        const primary = existingRows[0]
+        const { data: updatedH, error: uErr } = await supabase
+          .from('habits')
+          .update({ ...payload, archived: false })
+          .eq('id', primary.id)
+          .select()
+          .single()
+
+        if (!uErr && updatedH) {
+          setHabits(prev => {
+            const next = prev.map(h => (h.name.trim().toLowerCase() === normName ? (updatedH as Habit) : h))
+            localStorage.setItem('wa_real_habits', JSON.stringify(next))
+            return next
+          })
+        }
+        return
       }
 
       let { data, error } = await supabase.from('habits').insert(payload).select().single()
@@ -359,10 +421,10 @@ export function useHabits() {
     }
   }
 
-  /** Archive (soft-delete) a habit */
+  /** Archive (soft-delete) a habit — preserved for past locked days */
   async function archiveHabit(id: string) {
     setHabits(prev => {
-      const next = prev.filter(h => h.id !== id)
+      const next = prev.map(h => h.id === id ? { ...h, archived: true } : h)
       localStorage.setItem('wa_real_habits', JSON.stringify(next))
       return next
     })

@@ -70,35 +70,122 @@ export function getChallengeDates(startDate: string, durationDays: number): stri
 }
 
 /**
+ * Deduplicate habits:
+ * - Prefer active (!archived) over archived.
+ * - If multiple habits share the same normalized name, canonicalize to one and redirect old IDs.
+ */
+export function deduplicateHabits(rawHabits: Habit[]): {
+  canonicalHabits: Habit[];
+  idRedirectMap: Map<string, string>;
+} {
+  const nameMap = new Map<string, Habit>()
+  const idRedirectMap = new Map<string, string>()
+
+  // 1st pass: register active habits
+  for (const h of rawHabits) {
+    const key = h.name.trim().toLowerCase()
+    if (!h.archived) {
+      if (!nameMap.has(key)) {
+        nameMap.set(key, h)
+      } else {
+        // Duplicate active habit: redirect to first active
+        idRedirectMap.set(h.id, nameMap.get(key)!.id)
+      }
+    }
+  }
+
+  // 2nd pass: register archived habits if no active one with same name exists, else redirect
+  for (const h of rawHabits) {
+    const key = h.name.trim().toLowerCase()
+    if (h.archived) {
+      if (nameMap.has(key)) {
+        idRedirectMap.set(h.id, nameMap.get(key)!.id)
+      } else {
+        nameMap.set(key, h)
+      }
+    }
+  }
+
+  const canonicalHabits = Array.from(nameMap.values()).sort(
+    (a, b) => (a.position || 0) - (b.position || 0)
+  )
+  return { canonicalHabits, idRedirectMap }
+}
+
+/**
  * For each date in the challenge, compute completion stats.
- * Only includes dates up to today.
+ * Preserves past locked days:
+ * - Deduplicates habits by name so duplicate rows never inflate total.
+ * - Heals corrupted snapshots where total was bloated.
+ * - Newly added habits (created after the date) do NOT affect past dates.
+ * - Archived habits with logs on past dates are preserved.
  */
 export function computeDayStats(
   dates: string[],
   habits: Habit[],
   logs: Log[],
-  threshold: number
+  threshold: number,
+  lockedSnapshots?: Record<string, { total: number; completed: number; pct: number; isDone: boolean }>
 ): DayStats[] {
   const todayStr = today()
-  const activeHabits = habits.filter(h => !h.archived)
+  const { canonicalHabits, idRedirectMap } = deduplicateHabits(habits)
+
   const logMap = new Map<string, Map<string, Log>>()
 
-  // Build a quick lookup: dateStr -> habitId -> Log
+  // Build a quick lookup with canonical habit IDs
   for (const log of logs) {
     if (!logMap.has(log.date)) logMap.set(log.date, new Map())
-    logMap.get(log.date)!.set(log.habit_id, log)
+    const canonicalId = idRedirectMap.get(log.habit_id) || log.habit_id
+    const existing = logMap.get(log.date)!.get(canonicalId)
+    // If multiple logs exist for duplicate habit IDs on same day, preserve 'done'
+    if (!existing || (existing.status !== 'done' && log.status === 'done')) {
+      logMap.get(log.date)!.set(canonicalId, { ...log, habit_id: canonicalId })
+    }
   }
 
   return dates
     .filter(d => d <= todayStr)
     .map(date => {
+      // 1. If date has an immutable saved locked snapshot, check if it needs healing
+      if (
+        lockedSnapshots &&
+        lockedSnapshots[date] &&
+        lockedSnapshots[date].total > 0 &&
+        lockedSnapshots[date].total <= canonicalHabits.length
+      ) {
+        return {
+          date,
+          total: lockedSnapshots[date].total,
+          completed: lockedSnapshots[date].completed,
+          pct: lockedSnapshots[date].pct,
+          isDone: lockedSnapshots[date].isDone,
+        }
+      }
+
       const dayLogs = logMap.get(date) ?? new Map<string, Log>()
+
+      // 2. Determine applicable habits for this specific date:
+      // - For past days with logs: strictly only the habits that were logged on that day!
+      //   New habits added afterwards must NEVER be added to past locked days.
+      const isPast = date < todayStr
+      let applicableHabits: Habit[]
+
+      if (isPast && dayLogs.size > 0) {
+        applicableHabits = canonicalHabits.filter(h => dayLogs.has(h.id))
+      } else {
+        applicableHabits = canonicalHabits.filter(h => {
+          if (h.archived) return false
+          if (isPast && h.created_at && h.created_at.slice(0, 10) > date) return false
+          return true
+        })
+      }
+
       let completed = 0
-      for (const habit of activeHabits) {
+      for (const habit of applicableHabits) {
         const log = dayLogs.get(habit.id)
         if (isHabitDone(habit, log)) completed++
       }
-      const total = activeHabits.length
+      const total = applicableHabits.length
       const pct = total > 0 ? Math.round((completed / total) * 100) : 0
       return { date, total, completed, pct, isDone: pct >= threshold }
     })
@@ -125,15 +212,27 @@ export function computeHabitStats(
 ): HabitStats[] {
   const todayStr = today()
   const pastDates = dates.filter(d => d <= todayStr)
+  const { canonicalHabits, idRedirectMap } = deduplicateHabits(habits)
 
-  return habits.filter(h => !h.archived).map(habit => {
-    const habitLogs = logs.filter(l => l.habit_id === habit.id)
+  // Normalize logs to canonical habit IDs so logs under archived IDs count toward the habit
+  const redirectedLogs = logs.map(l => {
+    const canonicalId = idRedirectMap.get(l.habit_id)
+    return canonicalId ? { ...l, habit_id: canonicalId } : l
+  })
+
+  return canonicalHabits.filter(h => !h.archived).map(habit => {
+    const habitLogs = redirectedLogs.filter(l => l.habit_id === habit.id)
     const logMap = new Map(habitLogs.map(l => [l.date, l]))
     let completed = 0
-    for (const date of pastDates) {
+
+    // Only count dates starting from habit creation so new tasks don't get 0% for past days
+    const habitCreatedDate = habit.created_at ? habit.created_at.slice(0, 10) : pastDates[0] || todayStr
+    const relevantDates = pastDates.filter(d => d >= habitCreatedDate)
+
+    for (const date of relevantDates) {
       if (isHabitDone(habit, logMap.get(date))) completed++
     }
-    const total = pastDates.length
+    const total = relevantDates.length
     return {
       habit_id: habit.id,
       habit_name: habit.name,

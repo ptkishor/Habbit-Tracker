@@ -1,11 +1,18 @@
 import { useState, useCallback, useMemo, useEffect } from 'react'
-import type { Habit, Log } from '../types'
+import type { Habit, Log, StreakInfo } from '../types'
 import HabitTile from './HabitTile'
 import Modal from './Modal'
 import { AppIcon } from './Icons'
 import { celebrate, showToast, burst } from '../lib/effects'
 import { playCelebrationSound } from '../lib/soundEffects'
-import { isHabitDone, today, getDayNumber, isDatePastAutoLockCutoff, getAutoLockRemainingText } from '../lib/dateUtils'
+import {
+  isHabitDone,
+  today,
+  getDayNumber,
+  isDatePastAutoLockCutoff,
+  getAutoLockRemainingText,
+  deduplicateHabits,
+} from '../lib/dateUtils'
 
 interface TodayViewProps {
   userId: string
@@ -13,6 +20,7 @@ interface TodayViewProps {
   logs: Log[]
   selectedDate: string
   startDate: string
+  streaks?: StreakInfo
   onUpdateLog: (habitId: string, date: string, updates: Partial<Log>) => Promise<void>
   onGoToSettings?: () => void
 }
@@ -23,10 +31,10 @@ export default function TodayView({
   logs,
   selectedDate,
   startDate,
+  streaks,
   onUpdateLog,
   onGoToSettings,
 }: TodayViewProps) {
-  const activeHabits = useMemo(() => habits.filter(h => !h.archived), [habits])
   const todayStr = today()
 
   // Track finalized / locked dates across sessions and devices
@@ -68,18 +76,82 @@ export default function TodayView({
     }
   }, [isSubmittedFromLogs, selectedDate, userId, submittedDates])
 
-  // Build log map for selectedDate
+  // Canonicalize habits (deduplicates rows with same name/id, maps superseded IDs)
+  const { canonicalHabits, idRedirectMap } = useMemo(() => {
+    return deduplicateHabits(habits)
+  }, [habits])
+
+  // Build log map for selectedDate with redirected canonical habit IDs
   const logMap = useMemo(() => {
     const map = new Map<string, Log>()
     logs
       .filter(l => l.date === selectedDate)
-      .forEach(l => map.set(l.habit_id, l))
+      .forEach(l => {
+        const canonicalId = idRedirectMap.get(l.habit_id) || l.habit_id
+        const existing = map.get(canonicalId)
+        // If duplicate logs exist for the same canonical habit, preserve 'done'
+        if (!existing || (existing.status !== 'done' && l.status === 'done')) {
+          map.set(canonicalId, { ...l, habit_id: canonicalId })
+        }
+      })
     return map
-  }, [logs, selectedDate])
+  }, [logs, selectedDate, idRedirectMap])
+
+  // Preserves habits on past locked days:
+  // - Open current / future dates: show canonical active habits (never duplicate)
+  // - Past / locked dates: show ONLY habits that were logged on that day!
+  //   Newly created habits (added today or in future) must NEVER appear on past locked days.
+  const activeHabits = useMemo(() => {
+    if (selectedDate >= todayStr && !isLocked) {
+      return canonicalHabits.filter(h => !h.archived)
+    }
+
+    // For past days or locked days:
+    // 1. Strictly show ONLY the habits that have logs on this date
+    const loggedHabits = canonicalHabits.filter(h => logMap.has(h.id))
+    if (loggedHabits.length > 0) {
+      return loggedHabits
+    }
+
+    // 2. Fallback for past days without logs:
+    // Show only active habits that were created on or before this date
+    return canonicalHabits.filter(h => {
+      if (h.archived) return false
+      if (h.created_at && h.created_at.slice(0, 10) > selectedDate) return false
+      return true
+    })
+  }, [canonicalHabits, logMap, selectedDate, todayStr, isLocked])
 
   const doneCount = useMemo(() => {
     return activeHabits.filter(h => isHabitDone(h, logMap.get(h.id))).length
   }, [activeHabits, logMap])
+
+  // Persist snapshot of locked days to ensure immutable day preservation,
+  // and heal any old corrupted snapshot where total was inflated
+  useEffect(() => {
+    if (!isLocked || activeHabits.length === 0) return
+    const key = `wa_locked_snapshots_${userId}`
+    try {
+      const saved = localStorage.getItem(key)
+      const snapshots = saved ? JSON.parse(saved) : {}
+      const existing = snapshots[selectedDate]
+      const needsHealing = existing && (existing.total > activeHabits.length || existing.total > 20)
+
+      if (!existing || needsHealing) {
+        const pct = Math.round((doneCount / activeHabits.length) * 100)
+        snapshots[selectedDate] = {
+          total: activeHabits.length,
+          completed: doneCount,
+          pct,
+          isDone: pct >= 80,
+          habitIds: activeHabits.map(h => h.id),
+        }
+        localStorage.setItem(key, JSON.stringify(snapshots))
+      }
+    } catch {
+      // ignore
+    }
+  }, [isLocked, selectedDate, activeHabits, doneCount, userId])
 
   const handleAction = useCallback(
     async (
@@ -312,11 +384,47 @@ export default function TodayView({
                 ? 'Future Day (Locked)'
                 : 'Day In Progress'}
             </div>
-            <div style={{ fontSize: '12.5px', color: 'var(--ink3)' }}>
-              {doneCount} of {activeHabits.length} habits completed for {selectedDate}
+            <div style={{ fontSize: '12.5px', color: 'var(--ink3)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginTop: '3px' }}>
+              <span>{doneCount} of {activeHabits.length} habits completed for {selectedDate}</span>
               {!isDaySubmitted && !isFuture && (
-                <span style={{ marginLeft: '8px', opacity: 0.85 }}>
+                <span style={{ opacity: 0.85 }}>
                   • {getAutoLockRemainingText(selectedDate)}
+                </span>
+              )}
+              {streaks && (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '1px 8px',
+                    borderRadius: '99px',
+                    background: streaks.current > 0 ? 'rgba(255, 107, 61, 0.12)' : 'rgba(56, 189, 248, 0.12)',
+                    border: streaks.current > 0 ? '1px solid rgba(255, 107, 61, 0.3)' : '1px solid rgba(56, 189, 248, 0.3)',
+                    color: streaks.current > 0 ? '#FFA726' : 'var(--ice)',
+                    fontSize: '11.5px',
+                    fontWeight: 700,
+                  }}
+                  title={streaks.current > 0 ? `Active Streak: ${streaks.current} Days • Highest: ${streaks.best} Days` : streaks.best > 0 ? `Streak broken (0d). Highest Streak: ${streaks.best} Days` : 'Streak: 0d'}
+                >
+                  {streaks.current > 0 ? (
+                    <>
+                      <span>🔥</span>
+                      <span>{streaks.current}d Streak</span>
+                      {streaks.best > streaks.current && <span style={{ opacity: 0.7 }}>• Best: {streaks.best}d</span>}
+                    </>
+                  ) : streaks.best > 0 ? (
+                    <>
+                      <span>🏆</span>
+                      <span>Highest: {streaks.best}d</span>
+                      <span style={{ opacity: 0.65 }}>(Current: 0d)</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🔥</span>
+                      <span>Streak: 0d</span>
+                    </>
+                  )}
                 </span>
               )}
             </div>
