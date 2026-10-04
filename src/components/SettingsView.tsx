@@ -41,13 +41,27 @@ export default function SettingsView({
   onResetAllLogs,
 }: SettingsViewProps) {
   // Protocol settings
-  const [startDate, setStartDate] = useState(profile.start_date)
+  const [startDate, setStartDate] = useState(profile.start_date || today())
+  const [durationDays, setDurationDays] = useState(profile.duration_days ?? 90)
   const [threshold, setThreshold] = useState(profile.threshold ?? 80)
   const [privacyMode, setPrivacyMode] = useState(profile.privacy_mode ?? false)
   const [savingProtocol, setSavingProtocol] = useState(false)
 
-  // Current challenge status calculated live from startDate
-  const currentStatus = getChallengeDayStatus(today(), startDate, profile.duration_days ?? 90)
+  // Reactively sync form fields whenever profile updates from Supabase
+  React.useEffect(() => {
+    if (profile) {
+      setStartDate(profile.start_date || today())
+      setDurationDays(profile.duration_days ?? 90)
+      setThreshold(profile.threshold ?? 80)
+      setPrivacyMode(profile.privacy_mode ?? false)
+    }
+  }, [profile])
+
+  // Current challenge status calculated live from startDate and durationDays
+  const currentStatus = getChallengeDayStatus(today(), startDate, durationDays)
+
+  // Filter only active (non-archived) habits
+  const activeHabits = React.useMemo(() => habits.filter(h => !h.archived), [habits])
 
   // Habit modal state
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null)
@@ -71,6 +85,7 @@ export default function SettingsView({
       if (onUpdateProfile) {
         await onUpdateProfile({
           start_date: startDate,
+          duration_days: durationDays,
           threshold,
           privacy_mode: privacyMode,
         })
@@ -79,6 +94,7 @@ export default function SettingsView({
           .from('profiles')
           .update({
             start_date: startDate,
+            duration_days: durationDays,
             threshold,
             privacy_mode: privacyMode,
           })
@@ -87,7 +103,7 @@ export default function SettingsView({
         if (error) throw error
         await onRefreshProfile()
       }
-      showToast('Protocol parameters updated')
+      showToast('Protocol parameters updated and synced to cloud')
     } catch {
       showToast('Failed to update protocol')
     } finally {
@@ -184,9 +200,9 @@ export default function SettingsView({
 
   const handleMoveHabit = async (index: number, direction: 'up' | 'down') => {
     const targetIndex = direction === 'up' ? index - 1 : index + 1
-    if (targetIndex < 0 || targetIndex >= habits.length) return
+    if (targetIndex < 0 || targetIndex >= activeHabits.length) return
 
-    const reordered = [...habits]
+    const reordered = [...activeHabits]
     const temp = reordered[index]
     reordered[index] = reordered[targetIndex]
     reordered[targetIndex] = temp
@@ -371,6 +387,18 @@ export default function SettingsView({
           </div>
 
           <div className="form-group" style={{ marginTop: '10px' }}>
+            <label>Challenge Duration (Days)</label>
+            <input
+              type="number"
+              min={1}
+              max={365}
+              className="form-input"
+              value={durationDays}
+              onChange={e => setDurationDays(Math.max(1, parseInt(e.target.value) || 90))}
+            />
+          </div>
+
+          <div className="form-group" style={{ marginTop: '10px' }}>
             <div
               style={{
                 display: 'flex',
@@ -447,7 +475,7 @@ export default function SettingsView({
           }}
         >
           <h3 style={{ margin: 0 }}>
-            Habits<small>{habits.length} active</small>
+            Habits<small>{activeHabits.length} active</small>
           </h3>
           <button
             type="button"
@@ -470,7 +498,7 @@ export default function SettingsView({
             paddingRight: '4px',
           }}
         >
-          {habits.map((h, i) => (
+          {activeHabits.map((h, i) => (
             <div
               key={h.id}
               style={{
@@ -506,9 +534,9 @@ export default function SettingsView({
                 </button>
                 <button
                   type="button"
-                  disabled={i === habits.length - 1}
+                  disabled={i === activeHabits.length - 1}
                   className="step"
-                  style={{ opacity: i === habits.length - 1 ? 0.3 : 1 }}
+                  style={{ opacity: i === activeHabits.length - 1 ? 0.3 : 1 }}
                   onClick={() => handleMoveHabit(i, 'down')}
                   aria-label="Move habit down"
                 >

@@ -4,7 +4,7 @@ import type { DayStats } from '../types'
 import { getChallengeDayStatus, toDateStr, today } from '../lib/dateUtils'
 import { addDays, parseISO } from 'date-fns'
 
-const TOTAL = 90
+const DEFAULT_TOTAL = 90
 const C = 2 * Math.PI * 132
 
 function tickCol(p: number) {
@@ -64,7 +64,7 @@ interface DialPanelProps {
 
 export default function DialPanel({
   startDate,
-  durationDays,
+  durationDays = DEFAULT_TOTAL,
   selectedDate,
   dayStats,
   streakCurrent,
@@ -72,9 +72,10 @@ export default function DialPanel({
   averagePct,
   selectedDayPct,
 }: DialPanelProps) {
+  const totalDays = durationDays || DEFAULT_TOTAL
   const status = useMemo(
-    () => getChallengeDayStatus(selectedDate, startDate, durationDays),
-    [selectedDate, startDate, durationDays]
+    () => getChallengeDayStatus(selectedDate, startDate, totalDays),
+    [selectedDate, startDate, totalDays]
   )
 
   const dayMap = useMemo(() => {
@@ -91,7 +92,7 @@ export default function DialPanel({
 
   const arcOffset = C * (1 - selectedDayPct)
 
-  // Compute 90 ticks
+  // Compute ticks for challenge duration
   const ticks = useMemo(() => {
     const arr = []
     const selIdx = status.clampedDayNumber
@@ -99,12 +100,12 @@ export default function DialPanel({
     const todayStatus = getChallengeDayStatus(
       todayStr,
       startDate,
-      durationDays
+      totalDays
     )
     const tIdx = todayStatus.clampedDayNumber
     const startParsed = parseISO(startDate)
 
-    for (let i = 1; i <= TOTAL; i++) {
+    for (let i = 1; i <= totalDays; i++) {
       let col: string
       let r1 = 168
       let r2 = 190
@@ -128,7 +129,7 @@ export default function DialPanel({
         w = 5.5
       }
 
-      const a = ((i - 1) / TOTAL) * Math.PI * 2 - Math.PI / 2
+      const a = ((i - 1) / totalDays) * Math.PI * 2 - Math.PI / 2
       const c = Math.cos(a)
       const s = Math.sin(a)
 
@@ -143,7 +144,7 @@ export default function DialPanel({
       })
     }
     return arr
-  }, [startDate, durationDays, status.clampedDayNumber, dayMap])
+  }, [startDate, totalDays, status.clampedDayNumber, dayMap])
 
   return (
     <aside className="panel" aria-label="Challenge progress">
@@ -162,13 +163,13 @@ export default function DialPanel({
         </svg>
         <div>
           <b>Winter Arc</b>
-          <span>90-day challenge</span>
+          <span>{totalDays}-day challenge</span>
         </div>
       </div>
 
-      {/* 90-Tick Dial */}
+      {/* Dial */}
       <div className="dialwrap">
-        <svg id="dial" viewBox="0 0 400 400" role="img" aria-label="90-day dial">
+        <svg id="dial" viewBox="0 0 400 400" role="img" aria-label={`${totalDays}-day dial`}>
           <defs>
             <linearGradient id="arcg" x1="0" y1="0" x2="1" y2="1">
               <stop offset="0%" stopColor="#5ED0FF" />
@@ -218,12 +219,12 @@ export default function DialPanel({
             {!status.isStarted ? 'Starts in' : status.isCompleted ? 'Challenge' : 'Day'}
           </span>
           <span className="dn" id="dayNum">
-            {!status.isStarted ? (status.daysUntil ?? 1) : status.isCompleted ? '90' : animDayNum}
+            {!status.isStarted ? (status.daysUntil ?? 1) : status.isCompleted ? String(totalDays) : animDayNum}
           </span>
           <span className="dof">
             {!status.isStarted
               ? (status.daysUntil ?? 1) === 1 ? 'day' : 'days'
-              : status.isCompleted ? 'Complete' : 'of 90'}
+              : status.isCompleted ? 'Complete' : `of ${totalDays}`}
           </span>
         </div>
       </div>

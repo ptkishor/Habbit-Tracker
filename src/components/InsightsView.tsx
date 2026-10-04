@@ -305,9 +305,9 @@ export default function InsightsView({
         </div>
       </div>
 
-      {/* 90-day map */}
+      {/* Challenge Heatmap */}
       <div className="c m">
-        <h3>90-day map</h3>
+        <h3>{durationDays}-day map</h3>
         <div
           className="hm"
           id="hm"

@@ -4,10 +4,11 @@ import type { DayStats } from '../types'
 import { toDateStr, today, getDayNumber } from '../lib/dateUtils'
 
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-const TOTAL = 90
+const DEFAULT_TOTAL = 90
 
 interface DayStripProps {
   startDate: string
+  durationDays?: number
   selectedDate: string
   dayStats: DayStats[]
   onSelectDate: (date: string) => void
@@ -15,11 +16,13 @@ interface DayStripProps {
 
 export default function DayStrip({
   startDate,
+  durationDays = DEFAULT_TOTAL,
   selectedDate,
   dayStats,
   onSelectDate,
 }: DayStripProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const totalDays = durationDays || DEFAULT_TOTAL
 
   const statsMap = useMemo(() => {
     const map = new Map<string, number>()
@@ -30,9 +33,9 @@ export default function DayStrip({
   const todayStr = today()
   const todayIdx = Math.max(1, getDayNumber(todayStr, startDate))
   // Sliding 14-day window: if today is Day 1..7, show Days 1 to 14
-  // Otherwise center around todayIdx, clamped to 1..90
-  const from = Math.max(1, Math.min(TOTAL - 13, todayIdx <= 7 ? 1 : todayIdx - 6))
-  const to = Math.min(TOTAL, from + 13)
+  // Otherwise center around todayIdx, clamped to 1..totalDays
+  const from = Math.max(1, Math.min(Math.max(1, totalDays - 13), todayIdx <= 7 ? 1 : todayIdx - 6))
+  const to = Math.min(totalDays, from + 13)
 
   const chips = useMemo(() => {
     const list = []
@@ -79,8 +82,8 @@ export default function DayStrip({
           disabled={chip.isLocked}
           className={`chip ${chip.isSelected ? 'on' : ''} ${chip.isLocked ? 'locked' : ''} ${chip.isToday ? 'today-chip' : ''}`}
           data-k={chip.dateKey}
-          title={`Day ${chip.dayIndex} of 90 (${chip.dateKey})${chip.isToday ? ' • Today' : ''}`}
-          aria-label={`Day ${chip.dayIndex} of 90`}
+          title={`Day ${chip.dayIndex} of ${totalDays} (${chip.dateKey})${chip.isToday ? ' • Today' : ''}`}
+          aria-label={`Day ${chip.dayIndex} of ${totalDays}`}
           onClick={() => {
             if (!chip.isLocked) onSelectDate(chip.dateKey)
           }}

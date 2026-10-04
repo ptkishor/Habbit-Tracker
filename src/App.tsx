@@ -363,6 +363,7 @@ function MainApp() {
         {activeTab === 'today' && (
           <DayStrip
             startDate={startDate}
+            durationDays={durationDays}
             selectedDate={selectedDate}
             dayStats={dayStats}
             onSelectDate={setSelectedDate}
