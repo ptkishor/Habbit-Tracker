@@ -249,17 +249,30 @@ export default function InsightsView({
             <small>%</small>
           </b>
         </div>
-        <div className="kpi ember" style={{ '--d': 1 } as React.CSSProperties}>
-          <span>Current streak</span>
+        <div className={`kpi ${streaks.current > 0 ? 'ember' : ''}`} style={{ '--d': 1 } as React.CSSProperties}>
+          <span>{streaks.current === 0 && streaks.best > 0 ? 'Current (Reset)' : 'Current streak'}</span>
           <b>
+            {streaks.current > 0 ? '🔥 ' : streaks.best > 0 ? '❄️ ' : ''}
             {streaks.current}
             <small>days</small>
           </b>
         </div>
-        <div className="kpi" style={{ '--d': 2 } as React.CSSProperties}>
-          <span>Best streak</span>
+        <div
+          className="kpi"
+          style={{
+            '--d': 2,
+            background: streaks.current === 0 && streaks.best > 0 ? 'rgba(56, 189, 248, 0.12)' : undefined,
+            border: streaks.current === 0 && streaks.best > 0 ? '1px solid rgba(56, 189, 248, 0.35)' : undefined,
+          } as React.CSSProperties}
+          title={`All-time Highest Streak Record: ${streaks.best} Days`}
+        >
+          <span style={{ color: streaks.current === 0 && streaks.best > 0 ? 'var(--ice)' : undefined, fontWeight: streaks.current === 0 && streaks.best > 0 ? 700 : undefined }}>
+            {streaks.current === 0 && streaks.best > 0 ? '🏆 Highest Record' : 'Best streak'}
+          </span>
           <b>
-            {streaks.best}
+            <span style={{ color: streaks.current === 0 && streaks.best > 0 ? 'var(--ice)' : undefined }}>
+              {streaks.best}
+            </span>
             <small>days</small>
           </b>
         </div>

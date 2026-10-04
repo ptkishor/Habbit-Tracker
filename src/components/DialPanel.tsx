@@ -246,22 +246,32 @@ export default function DialPanel({
             cursor: onOpenStreakDetails ? 'pointer' : 'default',
             textAlign: 'left',
             transition: 'all 0.2s',
+            border: streakCurrent === 0 && streakBest > 0 ? '1px solid rgba(229, 72, 77, 0.25)' : undefined,
           }}
-          title="Click to view streak breakdown & rules"
+          title={streakCurrent === 0 && streakBest > 0 ? `Streak broken (0d). Highest streak was ${streakBest} days.` : "Click to view streak breakdown & rules"}
         >
-          <span className="sl">Streak</span>
+          <span className="sl">{streakCurrent === 0 && streakBest > 0 ? 'Streak (0d)' : 'Streak'}</span>
           <b>
             <span className="fl" role="img" aria-label="flame" style={{ display: 'inline-block', fontSize: '18px', lineHeight: 1 }}>
-              🔥
+              {streakCurrent > 0 ? '🔥' : streakBest > 0 ? '❄️' : '🔥'}
             </span>
             <span id="stStreak">{animStreak}</span>
             <small>days</small>
           </b>
         </button>
-        <div className="stat">
-          <span className="sl">Best</span>
+        <div
+          className="stat"
+          style={{
+            background: streakCurrent === 0 && streakBest > 0 ? 'rgba(56, 189, 248, 0.12)' : undefined,
+            border: streakCurrent === 0 && streakBest > 0 ? '1px solid rgba(56, 189, 248, 0.35)' : undefined,
+          }}
+          title={`All-time Highest Streak: ${streakBest} Days`}
+        >
+          <span className="sl" style={{ color: streakCurrent === 0 && streakBest > 0 ? 'var(--ice)' : undefined, fontWeight: streakCurrent === 0 && streakBest > 0 ? 700 : undefined }}>
+            {streakCurrent === 0 && streakBest > 0 ? '🏆 Highest' : 'Best'}
+          </span>
           <b>
-            <span id="stBest">{animBest}</span>
+            <span id="stBest" style={{ color: streakCurrent === 0 && streakBest > 0 ? 'var(--ice)' : undefined }}>{animBest}</span>
             <small>days</small>
           </b>
         </div>
