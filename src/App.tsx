@@ -15,7 +15,6 @@ import { SkeletonDialPanel, SkeletonTile } from './components/Skeleton'
 import { useHabits } from './hooks/useHabits'
 import {
   today,
-  getDayNumber,
   isHabitDone,
   computeDayStats,
   computeHabitStats,

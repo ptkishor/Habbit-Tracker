@@ -2,8 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import type { Profile } from '../types'
-import { DEFAULT_HABITS } from '../lib/defaultHabits'
-import { today, getDayNumber } from '../lib/dateUtils'
+import { today } from '../lib/dateUtils'
 
 interface AuthContextType {
   user: User | null
