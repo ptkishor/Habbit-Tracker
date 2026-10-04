@@ -1,0 +1,23 @@
+{
+  "name": "Winter Arc",
+  "short_name": "Winter Arc",
+  "description": "Winter Arc — 90-day challenge to build relentless discipline, track daily protocols, and get AI coaching.",
+  "theme_color": "#050F1A",
+  "background_color": "#050F1A",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": "/",
+  "icons": [
+    {
+      "src": "/pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/pwa-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
