@@ -89,7 +89,6 @@ function MainApp() {
     updateHabit,
     archiveHabit,
     reorderHabits,
-    applyPresetHabits,
     resetAllLogs,
     refetch,
   } = useHabits()
@@ -385,6 +384,7 @@ function MainApp() {
               selectedDate={selectedDate}
               startDate={startDate}
               onUpdateLog={upsertLog}
+              onGoToSettings={() => handleSelectTab('settings')}
             />
           ) : activeTab === 'insights' ? (
             <InsightsView
@@ -417,7 +417,6 @@ function MainApp() {
               onUpdateHabit={updateHabit}
               onArchiveHabit={archiveHabit}
               onReorderHabits={reorderHabits}
-              onApplyPreset={applyPresetHabits}
               onOpenAuth={() => setIsAuthModalOpen(true)}
               onResetAllLogs={resetAllLogs}
             />

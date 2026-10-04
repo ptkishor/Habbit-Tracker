@@ -280,29 +280,151 @@ export default function InsightsView({
         <div id="trend" ref={trendRef} />
       </div>
 
-      {/* Habit success bars */}
+      {/* Habit success circular rings */}
       <div className="c h">
-        <h3>
-          Habit success<small>all days so far</small>
-        </h3>
-        <div className="bars" id="bars">
-          {sortedHabitRates.map((item, idx) => {
-            const isWeakest =
-              idx === sortedHabitRates.length - 1 && validDays.length > 2
-            return (
-              <div
-                key={item.habit_id}
-                className={`hb ${isWeakest ? 'weak' : ''}`}
-              >
-                <span>{item.habit_name}</span>
-                <div className="tr">
-                  <i style={{ width: `${item.pct}%` }} />
-                </div>
-                <em>{item.pct}%</em>
-              </div>
-            )
-          })}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <h3 style={{ margin: 0 }}>
+            Habit success<small>circular rate meters</small>
+          </h3>
+          <span style={{ fontSize: '12px', color: 'var(--ink3)' }}>{sortedHabitRates.length} active</span>
         </div>
+
+        {sortedHabitRates.length === 0 ? (
+          <div className="empty" style={{ margin: '20px 0' }}>
+            No habit data to compute success rates. Add habits to view circular progress.
+          </div>
+        ) : (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
+              gap: '12px',
+              marginTop: '10px',
+              maxHeight: '360px',
+              overflowY: 'auto',
+              paddingRight: '4px',
+            }}
+          >
+            {sortedHabitRates.map((item, idx) => {
+              const isWeakest =
+                idx === sortedHabitRates.length - 1 && validDays.length > 2
+              const r = 28
+              const circ = 2 * Math.PI * r
+              const offset = circ * (1 - item.pct / 100)
+              const col =
+                item.pct >= threshold
+                  ? 'var(--done)'
+                  : item.pct >= 50
+                  ? 'var(--ice)'
+                  : item.pct > 0
+                  ? 'var(--ember)'
+                  : 'rgba(255,255,255,0.18)'
+
+              return (
+                <div
+                  key={item.habit_id}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '14px 10px',
+                    borderRadius: '16px',
+                    background: 'var(--card2)',
+                    border: isWeakest ? '1px solid rgba(255, 107, 61, 0.4)' : '1px solid var(--line)',
+                    position: 'relative',
+                    transition: 'transform 0.2s, border-color 0.2s',
+                    textAlign: 'center',
+                  }}
+                  title={`${item.habit_name}: ${item.pct}% (${item.completed_days} of ${item.total_days} days)`}
+                >
+                  {isWeakest && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '6px',
+                        right: '8px',
+                        fontSize: '9.5px',
+                        fontWeight: 700,
+                        color: 'var(--miss)',
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                      }}
+                    >
+                      Focus
+                    </span>
+                  )}
+
+                  {/* Circular SVG Ring */}
+                  <div style={{ position: 'relative', width: '72px', height: '72px' }}>
+                    <svg width="72" height="72" viewBox="0 0 72 72">
+                      <circle
+                        cx="36"
+                        cy="36"
+                        r={r}
+                        fill="none"
+                        stroke="rgba(255,255,255,0.08)"
+                        strokeWidth="6"
+                      />
+                      <circle
+                        cx="36"
+                        cy="36"
+                        r={r}
+                        fill="none"
+                        stroke={col}
+                        strokeWidth="6"
+                        strokeLinecap="round"
+                        strokeDasharray={circ}
+                        strokeDashoffset={offset}
+                        transform="rotate(-90 36 36)"
+                        style={{ transition: 'stroke-dashoffset 0.6s ease' }}
+                      />
+                    </svg>
+                    <div
+                      style={{
+                        position: 'absolute',
+                        inset: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '14px',
+                        fontWeight: 800,
+                        color: 'var(--ink)',
+                      }}
+                    >
+                      {item.pct}%
+                    </div>
+                  </div>
+
+                  {/* Habit Name & Days info */}
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: '13px',
+                      color: 'var(--ink)',
+                      marginTop: '8px',
+                      width: '100%',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                  >
+                    {item.habit_name}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: '11px',
+                      color: 'var(--ink3)',
+                      marginTop: '2px',
+                    }}
+                  >
+                    {item.completed_days} / {item.total_days} days
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Challenge Heatmap */}

@@ -1,6 +1,8 @@
-import { useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import type { Habit, Log } from '../types'
 import HabitTile from './HabitTile'
+import Modal from './Modal'
+import { AppIcon } from './Icons'
 import { celebrate, showToast, burst } from '../lib/effects'
 import { playCelebrationSound } from '../lib/soundEffects'
 import { isHabitDone, today, getDayNumber } from '../lib/dateUtils'
@@ -12,6 +14,7 @@ interface TodayViewProps {
   selectedDate: string
   startDate: string
   onUpdateLog: (habitId: string, date: string, updates: Partial<Log>) => Promise<void>
+  onGoToSettings?: () => void
 }
 
 export default function TodayView({
@@ -21,10 +24,44 @@ export default function TodayView({
   selectedDate,
   startDate,
   onUpdateLog,
+  onGoToSettings,
 }: TodayViewProps) {
   const activeHabits = useMemo(() => habits.filter(h => !h.archived), [habits])
   const todayStr = today()
-  const isLocked = selectedDate > todayStr
+
+  // Track finalized / locked dates across sessions and devices
+  const [submittedDates, setSubmittedDates] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return []
+    try {
+      const saved = localStorage.getItem(`wa_submitted_dates_${userId}`)
+      return saved ? JSON.parse(saved) : []
+    } catch {
+      return []
+    }
+  })
+
+  // Synchronize submitted state if database logs have 'final_submitted' in notes
+  const isSubmittedFromLogs = useMemo(() => {
+    return logs.some(l => l.date === selectedDate && l.notes?.includes('final_submitted'))
+  }, [logs, selectedDate])
+
+  const isDaySubmitted = submittedDates.includes(selectedDate) || isSubmittedFromLogs
+  const isFuture = selectedDate > todayStr
+  const isLocked = isFuture || isDaySubmitted
+
+  const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+
+  // Keep submittedDates in localStorage
+  useEffect(() => {
+    if (isSubmittedFromLogs && !submittedDates.includes(selectedDate)) {
+      setSubmittedDates(prev => {
+        const next = [...prev, selectedDate]
+        localStorage.setItem(`wa_submitted_dates_${userId}`, JSON.stringify(next))
+        return next
+      })
+    }
+  }, [isSubmittedFromLogs, selectedDate, userId, submittedDates])
 
   // Build log map for selectedDate
   const logMap = useMemo(() => {
@@ -35,6 +72,10 @@ export default function TodayView({
     return map
   }, [logs, selectedDate])
 
+  const doneCount = useMemo(() => {
+    return activeHabits.filter(h => isHabitDone(h, logMap.get(h.id))).length
+  }, [activeHabits, logMap])
+
   const handleAction = useCallback(
     async (
       habit: Habit,
@@ -42,6 +83,8 @@ export default function TodayView({
       btnEl: HTMLElement | null,
       tileEl: HTMLElement | null
     ) => {
+      if (isLocked) return
+
       const curLog = logMap.get(habit.id) || {
         id: '',
         habit_id: habit.id,
@@ -137,31 +180,242 @@ export default function TodayView({
         showToast('Failed to update habit. Please check your connection.')
       }
     },
-    [logMap, userId, selectedDate, activeHabits, onUpdateLog, startDate]
+    [logMap, userId, selectedDate, activeHabits, onUpdateLog, startDate, isLocked]
   )
+
+  const handleConfirmFinalSubmit = async () => {
+    setSubmitting(true)
+    try {
+      // 1. Mark in local storage
+      const next = Array.from(new Set([...submittedDates, selectedDate]))
+      setSubmittedDates(next)
+      localStorage.setItem(`wa_submitted_dates_${userId}`, JSON.stringify(next))
+
+      // 2. Persist 'final_submitted' in Supabase logs for all active habits
+      for (const h of activeHabits) {
+        const cur = logMap.get(h.id)
+        await onUpdateLog(h.id, selectedDate, {
+          status: cur?.status ?? null,
+          value: cur?.value ?? 0,
+          notes: 'final_submitted',
+        })
+      }
+
+      setIsSubmitModalOpen(false)
+      showToast(`Date ${selectedDate} finalized and locked permanently! 🔒`)
+      playCelebrationSound()
+    } catch {
+      showToast('Error locking day. Please try again.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   if (activeHabits.length === 0) {
     return (
-      <div className="empty" style={{ margin: '40px auto' }}>
-        No active habits found. Add habits in Settings to begin your protocol.
+      <div
+        className="c"
+        style={{
+          margin: '40px auto',
+          maxWidth: '460px',
+          textAlign: 'center',
+          padding: '36px 24px',
+          borderRadius: '24px',
+        }}
+      >
+        <div style={{ fontSize: '38px', marginBottom: '12px' }}>🎯</div>
+        <h3 style={{ fontSize: '20px', fontWeight: 800, marginBottom: '8px' }}>
+          No Goals or Habits Set
+        </h3>
+        <p style={{ fontSize: '14px', color: 'var(--ink2)', lineHeight: 1.5, margin: '0 0 20px' }}>
+          You have full control. No default habits are loaded. Add your custom habits and daily targets to start your challenge.
+        </p>
+        {onGoToSettings && (
+          <button
+            type="button"
+            className="cta"
+            style={{ margin: '0 auto', display: 'inline-flex' }}
+            onClick={onGoToSettings}
+          >
+            <AppIcon name="plus" size={16} />
+            <span>Set Custom Goals in Settings &rarr;</span>
+          </button>
+        )}
       </div>
     )
   }
 
   return (
-    <div className="habits" id="habits">
-      {activeHabits.map((habit, idx) => (
-        <HabitTile
-          key={habit.id}
-          habit={habit}
-          log={logMap.get(habit.id)}
-          index={idx}
-          locked={isLocked}
-          onAction={(action, btnEl, tileEl) =>
-            handleAction(habit, action, btnEl, tileEl)
-          }
-        />
-      ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* ── Day Action Header: Progress & Final Submit ── */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '10px',
+          padding: '12px 18px',
+          background: isDaySubmitted ? 'rgba(25, 199, 174, 0.08)' : 'var(--card)',
+          border: isDaySubmitted ? '1px solid rgba(25, 199, 174, 0.3)' : '1px solid var(--line)',
+          borderRadius: '16px',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '32px',
+              height: '32px',
+              borderRadius: '10px',
+              background: isDaySubmitted ? 'rgba(25, 199, 174, 0.15)' : 'var(--card2)',
+              color: isDaySubmitted ? 'var(--done)' : 'var(--ice)',
+            }}
+          >
+            <AppIcon name={isDaySubmitted ? 'shield' : 'today'} size={18} />
+          </span>
+          <div>
+            <div style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--ink)' }}>
+              {isDaySubmitted
+                ? 'Day Locked & Finalized'
+                : isFuture
+                ? 'Future Day (Locked)'
+                : 'Day In Progress'}
+            </div>
+            <div style={{ fontSize: '12.5px', color: 'var(--ink3)' }}>
+              {doneCount} of {activeHabits.length} habits completed for {selectedDate}
+            </div>
+          </div>
+        </div>
+
+        {/* Lock button or status badge */}
+        <div>
+          {isDaySubmitted ? (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '99px',
+                background: 'rgba(25, 199, 174, 0.15)',
+                color: 'var(--done)',
+                fontSize: '12.5px',
+                fontWeight: 700,
+              }}
+            >
+              <AppIcon name="lock" size={13} />
+              <span>Final Submitted (Cannot Change)</span>
+            </div>
+          ) : isFuture ? (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '99px',
+                background: 'var(--card2)',
+                color: 'var(--ink3)',
+                fontSize: '12.5px',
+                fontWeight: 600,
+              }}
+            >
+              <AppIcon name="snow" size={13} />
+              <span>Unlocks On Date</span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn-pill"
+              style={{
+                background: 'var(--card2)',
+                borderColor: 'var(--ice)',
+                color: 'var(--ice)',
+                padding: '8px 16px',
+                fontSize: '13px',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '7px',
+                cursor: 'pointer',
+              }}
+              onClick={() => setIsSubmitModalOpen(true)}
+              title="Lock habits for this date permanently"
+            >
+              <AppIcon name="lock" size={14} />
+              <span>Final Submit Day</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Habit Tiles Grid */}
+      <div className="habits" id="habits">
+        {activeHabits.map((habit, idx) => (
+          <HabitTile
+            key={habit.id}
+            habit={habit}
+            log={logMap.get(habit.id)}
+            index={idx}
+            locked={isLocked}
+            onAction={(action, btnEl, tileEl) =>
+              handleAction(habit, action, btnEl, tileEl)
+            }
+          />
+        ))}
+      </div>
+
+      {/* ── Final Submit Confirmation Modal ── */}
+      <Modal
+        isOpen={isSubmitModalOpen}
+        title="Final Submit & Lock Day"
+        onClose={() => setIsSubmitModalOpen(false)}
+      >
+        <div>
+          <p style={{ fontSize: '14.5px', color: 'var(--ink2)', lineHeight: 1.55, margin: '0 0 16px' }}>
+            Are you sure you want to finalize the submission for <b>{selectedDate}</b>?
+          </p>
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: '12px',
+              background: 'var(--miss-soft)',
+              color: 'var(--miss)',
+              fontSize: '13px',
+              marginBottom: '18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <AppIcon name="lock" size={16} />
+            <span>Once submitted, habit records for this date are locked and cannot be edited.</span>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              className="btn-pill"
+              onClick={() => setIsSubmitModalOpen(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="cta"
+              disabled={submitting}
+              style={{ background: 'var(--done)', borderColor: 'var(--done)' }}
+              onClick={handleConfirmFinalSubmit}
+            >
+              <AppIcon name="lock" size={15} />
+              <span>{submitting ? 'Locking...' : 'Confirm & Lock Day'}</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

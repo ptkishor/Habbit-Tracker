@@ -4,7 +4,6 @@ import Modal from './Modal'
 import { showToast } from '../lib/effects'
 import type { Habit, Profile, Log } from '../types'
 import { supabase } from '../lib/supabase'
-import { DEFAULT_HABITS, STANDARD_8_HABITS } from '../lib/defaultHabits'
 import { today, getChallengeDayStatus } from '../lib/dateUtils'
 
 interface SettingsViewProps {
@@ -19,7 +18,6 @@ interface SettingsViewProps {
   onUpdateHabit: (id: string, updates: Partial<Habit>) => Promise<void>
   onArchiveHabit: (id: string) => Promise<void>
   onReorderHabits: (reordered: Habit[]) => Promise<void>
-  onApplyPreset?: (presetHabits: Omit<Habit, 'id' | 'user_id' | 'created_at'>[]) => Promise<void>
   onOpenAuth?: () => void
   onResetAllLogs?: () => Promise<void>
 }
@@ -36,7 +34,6 @@ export default function SettingsView({
   onUpdateHabit,
   onArchiveHabit,
   onReorderHabits,
-  onApplyPreset,
   onOpenAuth,
   onResetAllLogs,
 }: SettingsViewProps) {
@@ -280,79 +277,8 @@ export default function SettingsView({
     }
   }
 
-  const handleApplyPreset = async (presetType: 'full' | 'standard') => {
-    const list = presetType === 'full' ? DEFAULT_HABITS : STANDARD_8_HABITS
-    if (onApplyPreset) {
-      await onApplyPreset(list)
-      showToast(`Protocol loaded: ${presetType === 'full' ? 'Full 16-Habit Arc' : 'The Standard (8 Reel Habits)'}`)
-    }
-  }
-
   return (
     <div className="settings-grid">
-      {/* ── 1-Click Preset Protocols ── */}
-      <div className="c" style={{ gridColumn: '1 / -1' }}>
-        <h3>
-          1-Click Preset Protocols<small>Quickly switch protocol templates</small>
-        </h3>
-        <p style={{ fontSize: '13.5px', color: 'var(--ink2)', margin: '0 0 14px' }}>
-          Instantly configure your habits to an official discipline protocol standard.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '10px' }}>
-          <button
-            type="button"
-            className="btn-pill"
-            style={{
-              justifyContent: 'space-between',
-              padding: '12px 16px',
-              background: 'var(--card2)',
-              borderColor: 'var(--line2)',
-            }}
-            onClick={() => handleApplyPreset('full')}
-            title="Load full 16-habit protocol"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span className="ico" style={{ width: '30px', height: '30px', borderRadius: '10px' }}>
-                <AppIcon name="snow" size={16} />
-              </span>
-              <div style={{ textAlign: 'left' }}>
-                <div style={{ fontWeight: 700, fontSize: '14.5px', color: 'var(--ink)' }}>Full 16-Habit Arc</div>
-                <div style={{ fontSize: '12px', color: 'var(--ink3)' }}>Complete 16-habit mental & physical discipline stack</div>
-              </div>
-            </div>
-            <span style={{ fontSize: '12.5px', color: 'var(--ice)', fontWeight: 700, flexShrink: 0, marginLeft: '8px' }}>
-              Apply &rarr;
-            </span>
-          </button>
-
-          <button
-            type="button"
-            className="btn-pill"
-            style={{
-              justifyContent: 'space-between',
-              padding: '12px 16px',
-              background: 'var(--card2)',
-              borderColor: 'var(--line2)',
-            }}
-            onClick={() => handleApplyPreset('standard')}
-            title="Load 8 reel habits protocol"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <span className="ico" style={{ width: '30px', height: '30px', borderRadius: '10px' }}>
-                <AppIcon name="target" size={16} />
-              </span>
-              <div style={{ textAlign: 'left' }}>
-                <div style={{ fontWeight: 700, fontSize: '14.5px', color: 'var(--ink)' }}>The Standard (8 Reel Habits)</div>
-                <div style={{ fontSize: '12px', color: 'var(--ink3)' }}>Core viral protocol: wake, hydrate, lift, read</div>
-              </div>
-            </div>
-            <span style={{ fontSize: '12.5px', color: 'var(--ice)', fontWeight: 700, flexShrink: 0, marginLeft: '8px' }}>
-              Apply &rarr;
-            </span>
-          </button>
-        </div>
-      </div>
-
       {/* ── 1. Challenge Protocol ── */}
       <div className="c">
         <h3>
